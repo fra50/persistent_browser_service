@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  pb-service:
+    build: .
+    container_name: pb-service
+    ports:
+      - '4000:4000'
+      - '5900:5900'
+      - '7900:7900'
+    environment:
+      API_KEY: 
+      PROFILE_DIR: 
+      HEADLESS: 
+      CONCURRENCY: 
+      NAVIGATION_TIMEOUT: 
+      FALLBACK_SNIPPET_LIMIT: 
+      FALLBACK_SNIPPET_TIMEOUT: 
+    volumes:
+      - ./pb-profiles:/profiles
+    restart: unless-stopped
+

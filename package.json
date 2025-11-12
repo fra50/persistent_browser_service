@@ -1,0 +1,27 @@
+{
+  "name": "persistent-browser-service",
+  "version": "1.0.0",
+  "description": "Docker-friendly API service that keeps a Playwright-powered browser warm and returns rendered HTML fast.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "NODE_ENV=development node src/index.js",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "keywords": [
+    "playwright",
+    "docker",
+    "browser",
+    "api",
+    "scraping"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.1.0",
+    "morgan": "^1.10.1",
+    "p-queue": "^9.0.0",
+    "playwright": "^1.56.1"
+  }
+}
