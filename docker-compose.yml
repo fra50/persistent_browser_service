@@ -3,6 +3,10 @@ services:
   pb-service:
     build: .
     container_name: pb-service
+    ports:
+      - "8211:4000"
+      - "6311:7900"
+      - "6911:5900"
     env_file:
       - .env
     volumes:
