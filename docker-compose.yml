@@ -4,18 +4,11 @@ services:
     build: .
     container_name: pb-service
     ports:
-      - '4000:4000'
-      - '5900:5900'
-      - '7900:7900'
-    environment:
-      API_KEY: 
-      PROFILE_DIR: 
-      HEADLESS: 
-      CONCURRENCY: 
-      NAVIGATION_TIMEOUT: 
-      FALLBACK_SNIPPET_LIMIT: 
-      FALLBACK_SNIPPET_TIMEOUT: 
+      - "${API_PORT:-8081}:4000"
+      - "${NOVNC_PORT:-6080}:7900"
+      - "${VNC_PORT:-5901}:5900"
+    env_file:
+      - .env
     volumes:
       - ./pb-profiles:/profiles
     restart: unless-stopped
-
