@@ -12,6 +12,7 @@ This project provides a small HTTP API that keeps a Chromium instance warm using
 - **POST /reset** — Force the browser context to restart if it ever gets stuck.
 - Request queue to prevent overlapping commands against the same context.
 - Optional extraction helper: supply selectors to capture text/attributes without extra parsing downstream.
+- Blocker detection highlights cookie walls or CAPTCHA screens by returning a dedicated `blocked` payload instead of empty content.
 
 ## Local Development
 ```bash
@@ -51,6 +52,7 @@ curl -X POST http://localhost:4000/search \
          }'
 ```
 Returns a `results` array with `{ title, link, snippet, sitePath }` plus metadata.
+If Google shows a cookie wall or CAPTCHA instead, the endpoint responds with HTTP 409 and the blocker payload documented below.
 
 ### `POST /maps`
 ```bash
@@ -66,6 +68,7 @@ curl -X POST http://localhost:4000/maps \
          }'
 ```
 Returns `{ title, href, rating, reviews, descriptor }` entries gathered from the Maps results panel (the service scrolls automatically until it reaches the requested limit).
+As with `/search`, cookie/CAPTCHA walls trigger a 409 blocker response instead of empty data.
 
 ## Docker
 Build and run:
@@ -105,6 +108,7 @@ Body fields:
 | `extract` | array | List of `{ name, selector, attr }` objects to pull text/attributes client-side. |
 | `evaluateScript` | string | Optional JavaScript function (as a string) executed inside the page after waits. Should be something like `async (args) => { ...; return data; }`. |
 | `evaluateArgs` | object | JSON payload passed as the single `args` argument to the evaluate script. |
+| `requiredSelectors` | array | CSS selectors that must exist in the DOM for the response to be considered valid. If none are present, the service returns a blocker payload instead of the usual data. |
 
 Response JSON:
 ```json
@@ -119,6 +123,25 @@ Response JSON:
   "html": "<!doctype html>..."
 }
 ```
+
+If a cookie banner, CAPTCHA, or similar blocking surface is detected before those selectors appear, the API responds with HTTP 409 and a payload shaped like:
+```json
+{
+  "blocked": true,
+  "blocker": {
+    "type": "captcha",
+    "reason": "Detected CAPTCHA or human-verification challenge",
+    "evidence": {
+      "selectors": [".g-recaptcha"]
+    },
+    "missingRequired": true
+  },
+  "url": "https://...",
+  "finalUrl": "https://...",
+  "timestamp": "2025-11-12T13:05:02.123Z"
+}
+```
+This check runs automatically for `/search` and `/maps`, and `/fetch` can opt-in by supplying `requiredSelectors`.
 
 ### GET /health
 Returns `{ "ok": true, "browserReady": true, "queueSize": 0, "pending": 0 }`. (Requires the same `X-API-Key` header.)

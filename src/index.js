@@ -158,6 +158,161 @@ async function fillMissingSnippets(results) {
   }
 }
 
+function buildBlockerPayload(blocker, meta = {}) {
+  return {
+    blocked: true,
+    blocker,
+    ...meta,
+  };
+}
+
+async function detectAccessBlocker(page, options = {}) {
+  const { requiredSelectors = [] } = options;
+  try {
+    return await page.evaluate(({ requiredSelectors }) => {
+      const toLower = (value) => (value || '').toLowerCase();
+      const bodyText = toLower(document.body ? document.body.innerText : '');
+      const htmlText = toLower(document.documentElement ? document.documentElement.innerHTML : '');
+
+      const collectSelectors = (selectors) =>
+        selectors.filter((selector) => {
+          try {
+            return Boolean(document.querySelector(selector));
+          } catch (_err) {
+            return false;
+          }
+        });
+
+      const collectPhrases = (phrases) =>
+        phrases.filter((phrase) => bodyText.includes(phrase));
+
+      const cookieSelectors = [
+        '#onetrust-banner-sdk',
+        '#onetrust-consent-sdk',
+        '.osano-cm-window',
+        '.truste_overlay',
+        '.qc-cmp2-container',
+        '.cookie-consent',
+        '.cookie-banner',
+        '.consent-banner',
+        '#cookie-banner',
+        '#sp-cc',
+        '[id*="cookieconsent"]',
+        '[class*="cookie-consent"]',
+        '[class*="gdpr-consent"]',
+      ];
+
+      const cookiePhrases = [
+        'we use cookies',
+        'cookie policy',
+        'accept all cookies',
+        'manage cookies',
+        'consent to cookies',
+        'your cookie preferences',
+        'cookie settings',
+      ];
+
+      const captchaSelectors = [
+        '#captcha',
+        '#captcha-form',
+        '#recaptcha',
+        '.g-recaptcha',
+        '.h-captcha',
+        '.cf-challenge-card',
+        '#challenge-form',
+        '#cf-challenge-running',
+        '[data-sitekey]',
+        'iframe[src*="recaptcha"]',
+        'iframe[src*="hcaptcha"]',
+        'iframe[src*="turnstile"]',
+        'iframe[src*="challenges.cloudflare.com"]',
+      ];
+
+      const captchaPhrases = [
+        'please verify you are human',
+        'are you a robot',
+        'confirm you are human',
+        'complete the captcha',
+        'security challenge',
+        'press and hold',
+        'checking if the site connection is secure',
+      ];
+
+      const missingRequired =
+        Array.isArray(requiredSelectors) &&
+        requiredSelectors.length > 0 &&
+        requiredSelectors.every((selector) => {
+          try {
+            return !document.querySelector(selector);
+          } catch (_err) {
+            return true;
+          }
+        });
+
+      const cookieHits = collectSelectors(cookieSelectors);
+      const cookieTextHits = collectPhrases(cookiePhrases);
+      if (cookieHits.length || cookieTextHits.length) {
+        return {
+          type: 'cookie',
+          reason: 'Detected cookie or consent banner covering the page',
+          evidence: {
+            selectors: cookieHits,
+            phrases: cookieTextHits,
+          },
+          missingRequired,
+        };
+      }
+
+      const captchaHits = collectSelectors(captchaSelectors);
+      const captchaTextHits = collectPhrases(captchaPhrases);
+      const captchaIframeSources = Array.from(document.querySelectorAll('iframe'))
+        .map((el) => el.getAttribute('src') || '')
+        .filter((src) =>
+          /recaptcha|hcaptcha|turnstile|challenges\.cloudflare\.com|cf\.tw|\/captcha/i.test(src)
+        );
+
+      const cloudflareMarkers =
+        htmlText.includes('cf-browser-verification') ||
+        htmlText.includes('cf-chl-widget') ||
+        htmlText.includes('cf_clearance');
+
+      if (
+        captchaHits.length ||
+        captchaTextHits.length ||
+        captchaIframeSources.length ||
+        cloudflareMarkers
+      ) {
+        return {
+          type: 'captcha',
+          reason: 'Detected CAPTCHA or human-verification challenge',
+          evidence: {
+            selectors: captchaHits,
+            phrases: captchaTextHits,
+            iframes: captchaIframeSources,
+          },
+          missingRequired,
+        };
+      }
+
+      if (missingRequired) {
+        return {
+          type: 'unknown',
+          reason: 'Required page content was not found after navigation',
+          evidence: {
+            selectors: requiredSelectors,
+          },
+          missingRequired: true,
+        };
+      }
+
+      return null;
+    }, { requiredSelectors });
+  } catch (err) {
+    console.warn('[browser-service] blocker detection failed', err.message);
+    return null;
+  }
+}
+
 app.get('/health', async (_req, res) => {
   const isReady = Boolean(sharedPage && !sharedPage.isClosed());
   res.json({ ok: true, browserReady: isReady, queueSize: queue.size, pending: queue.pending });
@@ -188,6 +343,19 @@ app.post('/search', async (req, res) => {
       await page.waitForSelector('#search', { timeout: NAVIGATION_TIMEOUT }).catch(() => {});
       if (waitForTimeout) {
         await page.waitForTimeout(waitForTimeout);
+      }
+
+      const blocker = await detectAccessBlocker(page, {
+        requiredSelectors: ['#search .g', '#search .tF2Cxc', '#search .Gx5Zad'],
+      });
+      if (blocker) {
+        return buildBlockerPayload(blocker, {
+          timestamp: new Date().toISOString(),
+          query,
+          url: searchUrl,
+          finalUrl: page.url(),
+          status: response ? response.status() : null,
+        });
       }
 
       const results = await page.evaluate(
@@ -499,6 +667,10 @@ app.post('/search', async (req, res) => {
       };
     });
 
+    if (result && result.blocked) {
+      return res.status(409).json(result);
+    }
+
     res.json(result);
   } catch (error) {
     console.error('Search error:', error);
@@ -533,6 +705,19 @@ app.post('/maps', async (req, res) => {
       await page.waitForSelector('a.hfpxzc', { timeout: NAVIGATION_TIMEOUT }).catch(() => {});
       if (waitForTimeout) {
         await page.waitForTimeout(waitForTimeout);
+      }
+
+      const blocker = await detectAccessBlocker(page, {
+        requiredSelectors: ['a.hfpxzc[href*="/place/"]', '.Nv2PK', '.lMbq3e'],
+      });
+      if (blocker) {
+        return buildBlockerPayload(blocker, {
+          timestamp: new Date().toISOString(),
+          query,
+          url: mapsUrl,
+          finalUrl: page.url(),
+          status: response ? response.status() : null,
+        });
       }
 
       const results = await page.evaluate(
@@ -588,6 +773,10 @@ app.post('/maps', async (req, res) => {
       };
     });
 
+    if (result && result.blocked) {
+      return res.status(409).json(result);
+    }
+
     res.json(result);
   } catch (error) {
     console.error('Maps error:', error);
@@ -607,6 +796,7 @@ app.post('/fetch', async (req, res) => {
     headers,
     evaluateScript,
     evaluateArgs,
+    requiredSelectors = [],
   } = req.body || {};
 
   if (!url) {
@@ -636,6 +826,18 @@ app.post('/fetch', async (req, res) => {
 
       if (waitForTimeout) {
         await page.waitForTimeout(waitForTimeout);
+      }
+
+      const blocker = await detectAccessBlocker(page, {
+        requiredSelectors: Array.isArray(requiredSelectors) ? requiredSelectors : [],
+      });
+      if (blocker) {
+        return buildBlockerPayload(blocker, {
+          timestamp: new Date().toISOString(),
+          url,
+          finalUrl: page.url(),
+          status: response ? response.status() : null,
+        });
       }
 
       let extracted = null;
@@ -683,6 +885,10 @@ app.post('/fetch', async (req, res) => {
         html,
       };
     });
+
+    if (result && result.blocked) {
+      return res.status(409).json(result);
+    }
 
     res.json(result);
   } catch (error) {
