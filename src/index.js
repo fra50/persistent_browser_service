@@ -324,7 +324,7 @@ app.post('/search', async (req, res) => {
     limit = 20,
     lang = 'en',
     waitUntil,
-    waitForTimeout = 1500,
+    waitForTimeout = 0,
     returnHtml = false,
     includeTopStories = true,
   } = req.body || {};
